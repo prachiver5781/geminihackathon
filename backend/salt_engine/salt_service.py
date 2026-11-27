@@ -6,7 +6,7 @@ CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "pmbjp_sample_cata
 
 
 def load_catalog(catalog_path: Path = CATALOG_PATH) -> List[Dict[str, Any]]:
-    with catalog_path.open("r", encoding="utf-8") as f:
+    with catalog_path.open("r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -50,7 +50,6 @@ def compare_medicine_against_catalog(
                 "source_citation": f"PMBJP Catalog ({entry['drug_code']})",
             }
 
-    # Zero-hallucination guardrail: never guess prices or salts outside grounded catalog
     return {
         "status": "NOT_IN_PMBJP_CATALOG",
         "query_brand": brand_name,
