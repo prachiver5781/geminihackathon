@@ -10,8 +10,10 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from salt_service import compare_prescription_medicines
+from backend.voice_ops.api import router as voice_ops_router
 
 app = FastAPI(title="Prachi - Gemini Enterprise Grounded PMBJP Salt Engine")
+app.include_router(voice_ops_router)
 
 
 class MedicineQuery(BaseModel):
