@@ -1,11 +1,62 @@
-﻿import React from "react";
+import React, { useEffect, useState } from "react";
 
-export default function SaltComparisonCard({ comparisonData }) {
-  if (!comparisonData || !comparisonData.items) {
-    return null;
+export default function SaltComparisonCard({
+  comparisonData,
+  medicines,
+  apiUrl = "http://localhost:8000/api/salt/compare",
+}) {
+  const [loadedComparison, setLoadedComparison] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!Array.isArray(medicines) || medicines.length === 0) {
+      setLoadedComparison(null);
+      setError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const compare = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            medicines: medicines.map(({ brand_name, strength, dosage_form, frequency }) => ({
+              brand_name,
+              strength,
+              dosage_form,
+              frequency,
+            })),
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Salt comparison failed (${response.status})`);
+        setLoadedComparison(await response.json());
+      } catch (err) {
+        if (err.name !== "AbortError") setError(err.message || "Unable to compare medicines.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+
+    compare();
+    return () => controller.abort();
+  }, [medicines, apiUrl]);
+
+  const result = comparisonData || loadedComparison;
+  if (loading) {
+    return <div role="status" className="p-4">Comparing medicines with the PMBJP catalog…</div>;
   }
+  if (error) {
+    return <div role="alert" className="p-4 text-red-700">{error}</div>;
+  }
+  if (!result || !Array.isArray(result.items)) return null;
 
-  const { items, summary, grounding_mode } = comparisonData;
+  const { items, summary, grounding_mode } = result;
 
   return (
     <div style={{ border: "1px solid #d1d5db", borderRadius: "12px", padding: "16px", background: "#fff" }}>
