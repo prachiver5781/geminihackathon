@@ -1,0 +1,29 @@
+﻿[
+  {
+    "drug_code": "PMBJP-00412",
+    "brand_name": "Augmentin 625 Duo",
+    "salt_composition": "Amoxicillin 500mg + Clavulanic Acid 125mg",
+    "strength": "625mg",
+    "pack_size": "10 Tablets",
+    "branded_mrp": 223.0,
+    "generic_mrp": 65.0
+  },
+  {
+    "drug_code": "PMBJP-00891",
+    "brand_name": "Pan-D Capsule",
+    "salt_composition": "Pantoprazole 40mg + Domperidone 30mg",
+    "strength": "40mg/30mg",
+    "pack_size": "15 Capsules",
+    "branded_mrp": 195.0,
+    "generic_mrp": 32.0
+  },
+  {
+    "drug_code": "PMBJP-01105",
+    "brand_name": "Dolo 650",
+    "salt_composition": "Paracetamol 650mg",
+    "strength": "650mg",
+    "pack_size": "15 Tablets",
+    "branded_mrp": 34.0,
+    "generic_mrp": 10.0
+  }
+]
