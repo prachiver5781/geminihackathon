@@ -3,8 +3,13 @@ import cors from "cors";
 import multer from "multer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, ".env") });
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -34,11 +39,29 @@ const sampleMedicines = [
   },
 ];
 
-const ai = new GoogleGenAI({
-  vertexai: true,
-  project: process.env.GOOGLE_CLOUD_PROJECT,
-  location: process.env.GOOGLE_CLOUD_LOCATION || "us-central1",
-});
+let vertexAI = null;
+let localAI = null;
+let vertexInitError = null;
+
+try {
+  vertexAI = new GoogleGenAI({
+    vertexai: true,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.GOOGLE_CLOUD_LOCATION || "us-central1",
+  });
+} catch (error) {
+  vertexInitError = error;
+  if (!ALLOW_ERROR_FALLBACK && !DEMO_FALLBACK) throw error;
+  console.warn("Vertex AI initialization failed; fallback is enabled.");
+}
+
+if ((ALLOW_ERROR_FALLBACK || DEMO_FALLBACK) && process.env.GEMINI_API_KEY) {
+  try {
+    localAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  } catch (error) {
+    console.warn("Local Gemini client initialization failed; sample fallback remains available.");
+  }
+}
 
 const prescriptionSchema = {
   type: Type.OBJECT,
@@ -83,7 +106,7 @@ app.post("/api/prescription/parse", upload.single("prescription"), async (req, r
 
     const base64Image = req.file.buffer.toString("base64");
 
-    const response = await ai.models.generateContent({
+    const request = {
       model: "gemini-2.5-flash",
       contents: [
         {
@@ -99,7 +122,33 @@ app.post("/api/prescription/parse", upload.single("prescription"), async (req, r
         responseSchema: prescriptionSchema,
         temperature: 0.1,
       },
-    });
+    };
+
+    let response;
+    let source = "gemini-enterprise-multimodal";
+    try {
+      if (!vertexAI) throw vertexInitError || new Error("Vertex AI client is unavailable");
+      response = await vertexAI.models.generateContent(request);
+    } catch (vertexError) {
+      if (!ALLOW_ERROR_FALLBACK && !DEMO_FALLBACK) throw vertexError;
+      console.warn("Vertex AI request failed; trying local/sample fallback.");
+      if (localAI) {
+        try {
+          response = await localAI.models.generateContent(request);
+          source = "local-gemini-fallback";
+        } catch (localError) {
+          console.warn("Local Gemini request failed; using sample data.");
+        }
+      }
+      if (!response) {
+        return res.json({
+          status: "success",
+          source: "error-fallback",
+          disclaimer: "Sample extraction data only. This is not medical advice.",
+          data: sampleMedicines,
+        });
+      }
+    }
 
     const parsed = JSON.parse(response.text);
     const medicines = (Array.isArray(parsed.medicines) ? parsed.medicines : []).map((medicine) => {
@@ -117,12 +166,12 @@ app.post("/api/prescription/parse", upload.single("prescription"), async (req, r
     });
     res.json({
       status: "success",
-      source: "gemini-enterprise-multimodal",
+      source,
       data: medicines,
     });
   } catch (err) {
     console.error("Prescription parse error:", err);
-    if (ALLOW_ERROR_FALLBACK) {
+    if (ALLOW_ERROR_FALLBACK || DEMO_FALLBACK) {
       return res.json({
         status: "success",
         source: "error-fallback",
