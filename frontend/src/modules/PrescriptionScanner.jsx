@@ -1,7 +1,12 @@
 import React, { useState } from "react";
 import SaltComparisonCard from "./SaltComparisonCard.jsx";
 
-export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparisonApiUrl }) {
+export default function PrescriptionScanner({
+  onMedicinesConfirmed,
+  saltComparisonApiUrl,
+  prescriptionApiUrl = "http://localhost:5002/api/prescription/parse",
+  showComparisonCard = true,
+}) {
   const [file, setFile] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -19,7 +24,7 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
     formData.append("prescription", file);
 
     try {
-      const res = await fetch("http://localhost:5002/api/prescription/parse", {
+      const res = await fetch(prescriptionApiUrl, {
         method: "POST",
         body: formData,
       });
@@ -119,7 +124,7 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
         </div>
       )}
 
-      {confirmedPayload && (
+      {showComparisonCard && confirmedPayload && (
         <p role="status" className="text-sm text-emerald-200">Medicines confirmed. Looking up catalog matches and prices…</p>
       )}
       {confirmedPayload && (
