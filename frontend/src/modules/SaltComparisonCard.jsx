@@ -3,14 +3,14 @@ import React, { useEffect, useState } from "react";
 export default function SaltComparisonCard({
   comparisonData,
   medicines,
-  apiUrl = "http://localhost:8000/api/salt/compare",
+  apiUrl = "http://localhost:5002/api/salt/compare",
 }) {
   const [loadedComparison, setLoadedComparison] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!Array.isArray(medicines) || medicines.length === 0) {
+    if (comparisonData || !Array.isArray(medicines) || medicines.length === 0) {
       setLoadedComparison(null);
       setError("");
       return undefined;
@@ -45,18 +45,24 @@ export default function SaltComparisonCard({
 
     compare();
     return () => controller.abort();
-  }, [medicines, apiUrl]);
+  }, [comparisonData, medicines, apiUrl]);
 
   const result = comparisonData || loadedComparison;
-  if (loading) {
-    return <div role="status" className="p-4">Comparing medicines with the PMBJP catalog…</div>;
+  if (!comparisonData && loading) {
+    return <div role="status" className="rounded-lg border border-sky-700 bg-sky-950/40 p-4 text-sky-100">Checking the PMBJP catalog for matches and listed prices…</div>;
   }
-  if (error) {
-    return <div role="alert" className="p-4 text-red-700">{error}</div>;
+  if (!comparisonData && error) {
+    return <div role="alert" className="rounded-lg border border-amber-700 bg-amber-950/40 p-4 text-amber-100">{error} Confirmed medicines are still available above; start the OCR service on port 5002 and try again.</div>;
   }
-  if (!result || !Array.isArray(result.items)) return null;
+  const results = result?.results || result?.items;
+  if (!Array.isArray(results)) return null;
 
-  const { items, summary, grounding_mode } = result;
+  const { summary, grounding_mode, fallback, message } = result;
+  const matchedCount = summary?.matched_count ?? results.filter((item) => item.status === "MATCHED").length;
+  const unlistedCount = summary?.unlisted_count ?? results.filter((item) => item.status !== "MATCHED").length;
+  const totalSavings = result.total_savings ?? summary?.total_savings_inr ?? 0;
+  const totalBranded = result.total_branded ?? summary?.total_branded_mrp;
+  const totalGeneric = result.total_generic ?? summary?.total_generic_mrp;
 
   return (
     <div style={{ border: "1px solid #d1d5db", borderRadius: "12px", padding: "16px", background: "#fff" }}>
@@ -66,6 +72,17 @@ export default function SaltComparisonCard({
           Grounded: {grounding_mode || "PMBJP Catalog"}
         </span>
       </div>
+
+      {message && (
+        <p className={`mb-3 rounded-lg p-3 text-sm ${fallback ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-700"}`}>
+          {message}
+        </p>
+      )}
+      {fallback && (
+        <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          Some medicines have no exact catalog match or catalog prices are unavailable. No prices were guessed; review the source citation for each row.
+        </p>
+      )}
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "14px" }}>
         <thead>
@@ -79,11 +96,15 @@ export default function SaltComparisonCard({
           </tr>
         </thead>
         <tbody>
-          {items.map((item, idx) => (
+          {results.map((item, idx) => (
             <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
               <td style={{ padding: "8px" }}>{item.query_brand} {item.query_strength}</td>
               <td style={{ padding: "8px" }}>
-                {item.status === "MATCHED" ? item.salt_composition : "Exact generic not in PMBJP catalog"}
+                {item.status === "MATCHED"
+                  ? item.salt_composition
+                  : item.status === "UNAVAILABLE"
+                    ? "Comparison data unavailable"
+                    : "Exact generic not in PMBJP catalog"}
               </td>
               <td style={{ padding: "8px" }}>{item.branded_mrp ? `₹${item.branded_mrp}` : "—"}</td>
               <td style={{ padding: "8px" }}>{item.generic_mrp ? `₹${item.generic_mrp}` : "—"}</td>
@@ -96,10 +117,15 @@ export default function SaltComparisonCard({
         </tbody>
       </table>
 
-      {summary && (
+      {results.length > 0 && (
         <div style={{ padding: "10px 12px", borderRadius: "8px", background: "#f0fdf4", display: "flex", justifyContent: "space-between" }}>
-          <span>Matched: <strong>{summary.matched_count}</strong> | Unlisted (No-Guess): <strong>{summary.unlisted_count}</strong></span>
-          <span>Total Savings: <strong style={{ color: "#059669" }}>₹{summary.total_savings_inr}</strong></span>
+          <span>Matched: <strong>{matchedCount}</strong> | Unlisted or unavailable: <strong>{unlistedCount}</strong></span>
+          <span>
+            {totalBranded != null && totalGeneric != null && (
+              <>Listed totals: <strong>₹{totalBranded}</strong> / <strong>₹{totalGeneric}</strong> · </>
+            )}
+            Savings: <strong style={{ color: "#059669" }}>₹{totalSavings}</strong>
+          </span>
         </div>
       )}
     </div>

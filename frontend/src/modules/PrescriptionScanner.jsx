@@ -6,11 +6,15 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [confirmedPayload, setConfirmedPayload] = useState(null);
+  const [uploadError, setUploadError] = useState("");
+  const [extractionNotice, setExtractionNotice] = useState("");
 
   const handleUpload = async () => {
     if (!file) return;
     setLoading(true);
     setConfirmedPayload(null);
+    setUploadError("");
+    setExtractionNotice("");
     const formData = new FormData();
     formData.append("prescription", file);
 
@@ -20,9 +24,14 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
         body: formData,
       });
       const json = await res.json();
-      setItems(json.data || []);
+      if (!res.ok) throw new Error(json.error || "Prescription scan failed.");
+      const extracted = Array.isArray(json.data) ? json.data : [];
+      setItems(extracted);
+      setExtractionNotice(json.disclaimer || (json.source?.includes("fallback")
+        ? "Demo sample medicines returned. Review every field before confirming."
+        : "Review the extracted fields and confirm them before comparison."));
     } catch (err) {
-      console.error("Upload failed:", err);
+      setUploadError(err.message || "Upload failed. Check that the OCR service is running on port 5002.");
     } finally {
       setLoading(false);
     }
@@ -67,6 +76,11 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
         </button>
       </div>
 
+      {uploadError && <p role="alert" className="text-sm text-red-300">{uploadError}</p>}
+      {extractionNotice && items.length > 0 && (
+        <p className="text-sm text-sky-200">{extractionNotice}</p>
+      )}
+
       {items.length > 0 && (
         <div className="space-y-2">
           {items.map((med, i) => (
@@ -88,7 +102,7 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
                 className="px-2 py-1 bg-slate-800 rounded border border-slate-600 w-28"
                 placeholder="Strength"
               />
-              <span className="text-xs text-slate-400">{med.frequency}</span>
+              <span className="text-xs text-slate-300">{med.dosage_form || "Dosage form not detected"} · {med.frequency || "Frequency not detected"}</span>
               {med.needs_confirmation && (
                 <span className="text-xs text-amber-400 font-medium">
                   Verify unclear handwriting
@@ -105,6 +119,9 @@ export default function PrescriptionScanner({ onMedicinesConfirmed, saltComparis
         </div>
       )}
 
+      {confirmedPayload && (
+        <p role="status" className="text-sm text-emerald-200">Medicines confirmed. Looking up catalog matches and prices…</p>
+      )}
       {confirmedPayload && (
         <SaltComparisonCard
           medicines={confirmedPayload.medicines}

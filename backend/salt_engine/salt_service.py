@@ -1,6 +1,6 @@
 ﻿import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "pmbjp_sample_catalog.json"
 
@@ -10,29 +10,36 @@ def load_catalog(catalog_path: Path = CATALOG_PATH) -> List[Dict[str, Any]]:
         return json.load(f)
 
 
-def _normalize(value: str) -> str:
-    return " ".join(value.strip().lower().split())
+def _normalize(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
 
 
 def compare_medicine_against_catalog(
     brand_name: str,
     strength: str = "",
-    catalog: List[Dict[str, Any]] | None = None,
+    catalog: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     items = catalog if catalog is not None else load_catalog()
     norm_brand = _normalize(brand_name)
     norm_strength = _normalize(strength)
 
     for entry in items:
-        entry_brand = _normalize(entry["brand_name"])
-        entry_strength = _normalize(entry["strength"])
+        # Ignore incomplete catalog rows so one bad entry does not break the
+        # comparison for every medicine in a prescription.
+        if not isinstance(entry, dict) or not entry.get("brand_name") or not entry.get("strength"):
+            continue
+        entry_brand = _normalize(str(entry["brand_name"]))
+        entry_strength = _normalize(str(entry["strength"]))
 
         brand_matches = norm_brand == entry_brand or (norm_brand and norm_brand in entry_brand)
         strength_matches = (not norm_strength) or (norm_strength == entry_strength)
 
         if brand_matches and strength_matches:
-            branded_mrp = float(entry["branded_mrp"])
-            generic_mrp = float(entry["generic_mrp"])
+            try:
+                branded_mrp = float(entry["branded_mrp"])
+                generic_mrp = float(entry["generic_mrp"])
+            except (KeyError, TypeError, ValueError):
+                continue
             savings_inr = round(max(0.0, branded_mrp - generic_mrp), 2)
             savings_pct = round((savings_inr / branded_mrp) * 100, 1) if branded_mrp > 0 else 0.0
 
