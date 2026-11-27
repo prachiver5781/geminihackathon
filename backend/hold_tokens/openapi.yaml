@@ -1,0 +1,292 @@
+openapi: 3.0.3
+info:
+  title: Jan Aushadhi Hold Tokens API
+  version: 1.0.0
+  description: Deterministic live stock lookup, closing-capped holds, FIFO waitlists, pickup PINs, and fulfillment receipts.
+servers:
+  - url: https://YOUR_HOST
+    description: Replace with the deployed service URL
+paths:
+  /api/tokens/inventory/{store_id}:
+    get:
+      operationId: getStoreInventory
+      summary: Look up an exact Jan Aushadhi store's live stock and MRP
+      description: >-
+        Read-only lookup. Use only the returned store_id, drug_code, salt,
+        available_qty, and MRP as evidence. Never infer stock, a substitute
+        medicine, or a price. If the store is unknown, report that result.
+      parameters:
+        - name: store_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Store inventory
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreInventory' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/tokens/hold:
+    post:
+      operationId: reserveStoreStock
+      summary: Reserve explicitly confirmed medicines at one confirmed store for two hours
+      description: >-
+        This action deducts live stock and creates an active two-hour reservation.
+        Call only after the user explicitly confirms patient_name, the exact
+        store_id, every drug_code, and each qty. Never guess a medicine, substitute
+        a drug code, infer a quantity, or quote a price as available. Use the
+        inventory lookup to verify current stock and MRP first. A 409 means no
+        items were reserved; show the returned availability and ask what to do.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patient_name, store_id, items]
+              properties:
+                patient_name: { type: string, minLength: 1, description: User-provided name to attach to this reservation; do not infer it }
+                store_id: { type: string, example: PMBJK-CHD-17 }
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [drug_code, qty]
+                    properties:
+                      drug_code: { type: string, minLength: 1, example: PMBJP-101, description: Exact PMBJP code returned by inventory and explicitly confirmed by the user }
+                      qty: { type: integer, minimum: 1, example: 2, description: Positive integer quantity explicitly confirmed by the user }
+      responses:
+        '201':
+          description: Stock reserved and token created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldToken' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409':
+          description: One or more requested quantities are unavailable; no stock was deducted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  unavailable:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        drug_code: { type: string }
+                        requested_qty: { type: integer }
+                        available_qty: { type: integer }
+  /api/tokens/fulfill:
+    post:
+      operationId: fulfillHoldToken
+      summary: Mark an active token fulfilled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token_id]
+              properties:
+                token_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Fulfilled token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldToken' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/tokens/release-expired:
+    post:
+      operationId: releaseExpiredHolds
+      summary: Release expired holds, with optional live-demo force expiration
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force_expire_token_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Released token IDs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  released_count: { type: integer }
+                  released_token_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+                  activated_waitlist:
+                    type: array
+                    description: FIFO waitlist entries automatically converted to active hold tokens using released stock
+                    items:
+                      type: object
+                      properties:
+                        waitlist_id: { type: string, format: uuid }
+                        token: { $ref: '#/components/schemas/HoldToken' }
+        '400': { $ref: '#/components/responses/Error' }
+  /api/tokens/waitlist:
+    post:
+      operationId: joinStockWaitlist
+      summary: Join the FIFO queue for a drug code that is out of stock
+      description: >-
+        Adds one request to the FIFO queue only when the exact store has zero
+        available units for the requested drug code. When release-expired frees
+        enough stock, the oldest eligible request is automatically assigned an
+        ACTIVE hold token. Strict FIFO means later smaller requests do not pass
+        an earlier request that needs more stock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_id, drug_code, qty]
+              properties:
+                patient_name: { type: string, minLength: 1 }
+                store_id: { type: string }
+                drug_code: { type: string }
+                qty: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Waitlist entry created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WaitlistEntry' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: Stock is available now; create a hold instead }
+  /api/tokens/waitlist/{waitlist_id}:
+    get:
+      operationId: getWaitlistStatus
+      summary: Check whether a FIFO waitlist entry has received a hold token
+      parameters:
+        - name: waitlist_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current queue or auto-reservation status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WaitlistEntry' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/tokens/refill-alerts:
+    get:
+      operationId: getRefillAlerts
+      summary: Get sample chronic-care refill reminders
+      responses:
+        '200':
+          description: Refill reminders for one-tap re-reservation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                      required: [days_remaining, drug_code, salt, preferred_store]
+                      properties:
+                        days_remaining: { type: integer }
+                        drug_code: { type: string }
+                        salt: { type: string }
+                        preferred_store: { type: string }
+components:
+  responses:
+    Error:
+      description: Request could not be completed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+  schemas:
+    StoreInventory:
+      type: object
+      properties:
+        store_id: { type: string }
+        name: { type: string }
+        city: { type: string }
+        state: { type: string }
+        address: { type: string }
+        latitude: { type: number }
+        longitude: { type: number }
+        closing_hour_ist: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [drug_code, salt, available_qty, mrp, closing_hour_ist]
+            properties:
+              drug_code: { type: string }
+              salt: { type: string }
+              available_qty: { type: integer }
+              mrp: { type: number, format: float, description: MRP in INR }
+              branded_mrp: { type: number, format: float, description: Seeded illustrative comparator MRP in INR; replace with verified local price data for production }
+              closing_hour_ist: { type: string }
+    HoldToken:
+      type: object
+      properties:
+        token_id: { type: string, format: uuid }
+        patient_name: { type: string }
+        store_id: { type: string }
+        status: { type: string, enum: [ACTIVE, FULFILLED, EXPIRED] }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              drug_code: { type: string }
+              salt: { type: string }
+              quantity: { type: integer }
+              mrp: { type: number }
+              line_total_inr: { type: number }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        total_payable_inr: { type: number }
+        qr_payload: { type: string, description: Compact JSON payload for QR encoding }
+        proxy_pin: { type: string, pattern: '^\d{4}$' }
+        closing_warning: { type: boolean, description: True when the two-hour expiry was capped to 15 minutes before store closing }
+        receipt:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  drug_code: { type: string }
+                  salt: { type: string }
+                  quantity: { type: integer }
+                  branded_equivalent_line_total: { type: number }
+                  jan_aushadhi_paid_line: { type: number }
+                  saved_line_inr: { type: number }
+            branded_equivalent_total: { type: number }
+            jan_aushadhi_paid: { type: number }
+            total_saved_inr: { type: number }
+            benchmark_note: { type: string }
+    WaitlistEntry:
+      type: object
+      properties:
+        waitlist_id: { type: string, format: uuid }
+        store_id: { type: string }
+        drug_code: { type: string }
+        salt: { type: string }
+        qty: { type: integer }
+        status: { type: string, enum: [WAITING, RESERVED] }
+        position: { type: integer }
+        token_id: { type: string, format: uuid }
+        token: { $ref: '#/components/schemas/HoldToken' }
